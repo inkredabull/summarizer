@@ -1,5 +1,5 @@
 {
-  "name": "markdown-summarizer",
+  "name": "summarizer",
   "version": "2.0.0",
   "description": "Summarize Markdown notes using Ollama (local LLM)",
   "type": "module",

@@ -75,7 +75,7 @@ ollama pull llama3.2
 ### 3. Navigate to the project
 
 ```bash
-cd /Users/inkredabull/scripts/markdown-summarizer
+cd /path/to/summarizer
 ```
 
 No dependencies needed - uses only Node.js built-in modules.
