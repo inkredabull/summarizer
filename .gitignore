@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output directories and files
+*_summaries/
+summaries/
+*.txt
+!summarization-prompt.txt
+AGGREGATE_SUMMARY.txt
+*_summary.txt
+
+# Test files and directories - NEVER commit personal data
+test_notes/
+notes/
+markdown_notes/
+ThisYearInMensGroup/
+TahoeNotes/
+*.md
+!README.md

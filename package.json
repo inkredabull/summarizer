@@ -1,0 +1,23 @@
+{
+  "name": "markdown-summarizer",
+  "version": "2.0.0",
+  "description": "Summarize Markdown notes using Ollama (local LLM)",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "markdown",
+    "summarize",
+    "ollama",
+    "llm",
+    "local",
+    "notes"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
