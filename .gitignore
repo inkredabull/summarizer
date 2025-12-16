@@ -31,3 +31,6 @@ ThisYearInMensGroup/
 TahoeNotes/
 *.md
 !README.md
+
+# Personal prompt file (keep private)
+summarization-prompt-PERSONAL.txt
