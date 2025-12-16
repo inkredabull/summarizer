@@ -2,6 +2,36 @@
 
 Automatically summarize Markdown notes using Ollama (local LLM).
 
+## Why This Project Exists
+
+This tool evolved from a need to summarize personal journal entries while maintaining complete privacy and control. The journey:
+
+1. **Initial Approach**: Started with Apple Intelligence via macOS Shortcuts
+   - Quick to set up, but lacked control over summarization behavior
+   - No ability to provide detailed instructions (system prompts)
+   - Output quality was inconsistent and couldn't be tuned
+
+2. **Privacy Concerns**: Sensitive personal notes (PII, private reflections)
+   - Needed to ensure tokens never leave the local machine
+   - Cloud-based APIs (OpenAI, Claude) were not an option
+   - Local processing was a hard requirement
+
+3. **Switch to Ollama**: Migrated to local LLM infrastructure
+   - Full control over prompts and model selection
+   - Detailed `summarization-prompt.txt` for precise instructions
+   - Complete privacy - all processing happens locally
+   - Iterated through models to find the right balance:
+     - Started with `mistral-small` (too limited - 2k context window)
+     - Moved to `llama3.2` (128k context, better quality)
+     - Optimized for speed with smaller variants (`llama3.2:1b`)
+
+4. **Performance Optimization**: Added parallel processing
+   - Sequential processing took ~60 minutes for a year of notes
+   - Implemented `--parallel` flag for concurrent month processing
+   - M4 Mac mini with parallel processing: 10-15 minutes (4-6x faster)
+
+The result: A privacy-first, highly-configurable summarization tool that processes personal notes locally with full control over how summaries are generated.
+
 ## Features
 
 - Summarizes all Markdown files in a folder
