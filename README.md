@@ -1,4 +1,4 @@
-# Markdown Summarizer
+# Summarizer
 
 Automatically summarize Markdown notes using Ollama (local LLM).
 
@@ -43,9 +43,45 @@ The result: A privacy-first, highly-configurable summarization tool that process
 
 ## Requirements
 
+- **Markdown files with your notes** (see "Preparing Your Notes" below)
 - Ollama installed and running ([ollama.com](https://ollama.com))
 - Node.js 14 or higher
 - A model pulled (e.g., `ollama pull llama3.2`)
+
+## Preparing Your Notes
+
+This tool works with Markdown (`.md`) files. If you're using Apple Notes or another note-taking app, you'll need to export your notes as Markdown files first.
+
+### Exporting from Apple Notes
+
+**Option 1: Use Exporter (Recommended)**
+- [Exporter by Chintan Ghate](https://apps.apple.com/us/app/exporter/id1099120373) - Free Mac app
+- Exports entire folders or individual notes to Markdown
+- Preserves formatting, attachments, and structure
+- Select notes → Export → Choose Markdown format
+
+**Option 2: Manual Export (Built-in)**
+- Open Notes app
+- Select note(s) to export
+- File → Export as PDF... then convert using tools like Pandoc
+- Not ideal for bulk export
+
+**Option 3: Third-party tools**
+- [Tahoe](https://www.tahoenotes.com/) - Alternative notes app with built-in Markdown export
+- [CloudPull](https://www.goldenhillsoftware.com/cloudpull/) - Backup tool that can export to Markdown
+
+### Date Format Requirement
+
+Each markdown file should contain a date header at the top in one of these formats:
+```markdown
+# 1/29/25
+```
+or
+```markdown
+## 10/22/25
+```
+
+The script parses these dates to group notes by month. Files without recognizable dates will be grouped as "Unknown Date".
 
 ## Installation
 
