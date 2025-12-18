@@ -21,7 +21,9 @@ summaries/
 *.txt
 !summarization-prompt.txt
 AGGREGATE_SUMMARY.txt
+AGGREGATE_SUMMARY.md
 *_summary.txt
+CONCATENATED_ALL_FILES.txt
 
 # Test files and directories - NEVER commit personal data
 test_notes/

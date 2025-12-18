@@ -5,13 +5,14 @@ import path from "path";
 import http from "http";
 
 // ---- CONFIG ----
-const OLLAMA_MODEL = "llama3.2:1b";
-const OLLAMA_URL = "http://localhost:11434/api/generate";
+const OLLAMA_MODEL = "llama3.2:3b";
+const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434/api/generate";
 const DEFAULT_OUTPUT_SUFFIX = "_summaries";
-const PROMPT_FILE = "summarization-prompt.txt";
+const PROMPT_FILE = "summarization-prompt-PERSONAL.txt";
 const MAX_CHUNK_SIZE = 40000; // Characters per chunk - llama3.2 has 128k token context (~500k chars)
-const ESTIMATED_TOKENS_PER_SECOND = 2; // Adjust based on actual performance from completion stats
+const ESTIMATED_TOKENS_PER_SECOND = 1.4; // Calibrated from actual llama3.2:3b runs (output generation rate)
 const EXPECTED_YEAR = 2025; // All dates should be this year (auto-corrects discrepancies)
+const SAVE_DEBUG_PROMPTS = true; // Save prompts sent to LLM for inspection
 
 // ----------------
 
@@ -41,6 +42,26 @@ function estimateTime(inputTokens, outputTokens = 500) {
   const totalTime = (inputProcessingTime + outputGenerationTime) * 1.1;
 
   return totalTime;
+}
+
+function extractPrioritySections(text) {
+  // Count "Things That Matter To Me" sections for logging and emphasis
+  // These sections represent core priorities and should be tracked longitudinally
+  const prioritySections = [];
+
+  // Pattern to match "Things That Matter To Me" and its nested content
+  // This captures from the header through all nested bullet points
+  const regex = /\*\s+Things That Matter To Me\s*\n((?:\s+\*[^\n]*\n)*)/gi;
+
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const section = match[0].trim();
+    if (section.length > 30) { // Only include if has meaningful content
+      prioritySections.push(section);
+    }
+  }
+
+  return prioritySections;
 }
 
 function cleanMarkdownContent(text) {
@@ -157,7 +178,6 @@ async function summarizeWithOllama(text, showProgress = false) {
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
             if (showProgress) {
               const outputTokens = estimateTokens(response.response);
-              const tokensPerSec = (outputTokens / elapsed).toFixed(1);
               const totalTokens = inputTokens + outputTokens;
               const effectiveRate = (totalTokens / elapsed).toFixed(1);
               console.log(`    ✓ Completed in ${elapsed}s (${effectiveRate} tokens/sec overall, ${outputTokens.toLocaleString()} output)`);
@@ -321,6 +341,111 @@ function groupFilesByMonth(files, notesDir) {
     .map(([key, value]) => ({ key, ...value }));
 }
 
+async function concatenateAllFiles(notesDir, outputDir) {
+  // Validate input directory
+  if (!fs.existsSync(notesDir)) {
+    throw new Error(`Directory not found: ${notesDir}`);
+  }
+
+  const stat = fs.statSync(notesDir);
+  if (!stat.isDirectory()) {
+    throw new Error(`Not a directory: ${notesDir}`);
+  }
+
+  // Create output directory
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  // Find all markdown files
+  const files = fs
+    .readdirSync(notesDir)
+    .filter(f => f.endsWith(".md") || f.endsWith(".markdown"))
+    .sort(); // Sort alphabetically for consistency
+
+  if (files.length === 0) {
+    console.log("No markdown files found in the directory.");
+    return;
+  }
+
+  console.log(`Found ${files.length} markdown file(s)\n`);
+
+  // Read and concatenate all files
+  const allContent = [];
+  let totalOriginalChars = 0;
+
+  for (const file of files) {
+    const fullPath = path.join(notesDir, file);
+    try {
+      const content = fs.readFileSync(fullPath, "utf8");
+      totalOriginalChars += content.length;
+
+      // Parse date from content for display
+      const dateInfo = parseDateFromContent(content, file);
+      const dateStr = dateInfo
+        ? `${dateInfo.month}/${dateInfo.day}/${dateInfo.year}`
+        : 'unknown date';
+
+      console.log(`  ✓ ${file} (${dateStr}) - ${content.length.toLocaleString()} chars`);
+
+      // Add separator with filename and date
+      allContent.push(`${'='.repeat(80)}`);
+      allContent.push(`FILE: ${file} | DATE: ${dateStr}`);
+      allContent.push(`${'='.repeat(80)}`);
+      allContent.push('');
+      allContent.push(content);
+      allContent.push('');
+    } catch (error) {
+      console.error(`  ✗ Error reading ${file}: ${error.message}`);
+    }
+  }
+
+  const concatenatedText = allContent.join('\n');
+  const cleanedText = cleanMarkdownContent(concatenatedText);
+
+  // Calculate statistics
+  const originalTokens = estimateTokens(concatenatedText);
+  const cleanedTokens = estimateTokens(cleanedText);
+  const tokensSaved = originalTokens - cleanedTokens;
+  const charsSaved = concatenatedText.length - cleanedText.length;
+
+  // Write to file
+  const outputFilename = 'CONCATENATED_ALL_FILES.txt';
+  const outputPath = path.join(outputDir, outputFilename);
+  fs.writeFileSync(outputPath, cleanedText);
+
+  // Display results
+  console.log(`\n${'='.repeat(80)}`);
+  console.log('CONCATENATION COMPLETE');
+  console.log('='.repeat(80));
+  console.log(`📄 Output file: ${outputFilename}`);
+  console.log(`📊 Total files: ${files.length}`);
+  console.log(`\n📏 Original content:`);
+  console.log(`   Characters: ${concatenatedText.length.toLocaleString()}`);
+  console.log(`   Tokens (estimated): ${originalTokens.toLocaleString()}`);
+  console.log(`\n🧹 After cleaning:`);
+  console.log(`   Characters: ${cleanedText.length.toLocaleString()}`);
+  console.log(`   Tokens (estimated): ${cleanedTokens.toLocaleString()}`);
+  console.log(`\n💾 Savings:`);
+  console.log(`   Characters saved: ${charsSaved.toLocaleString()} (${((charsSaved / concatenatedText.length) * 100).toFixed(1)}%)`);
+  console.log(`   Tokens saved: ${tokensSaved.toLocaleString()} (${((tokensSaved / originalTokens) * 100).toFixed(1)}%)`);
+
+  // Context window analysis
+  console.log(`\n🪟 Context Window Analysis:`);
+  const models = [
+    { name: 'llama3.2:1b/3b', context: 128000 },
+    { name: 'llama3.1:8b', context: 128000 },
+    { name: 'qwen2.5:7b/14b', context: 128000 },
+    { name: 'claude-sonnet-4', context: 200000 },
+  ];
+
+  models.forEach(model => {
+    const usage = ((cleanedTokens / model.context) * 100).toFixed(1);
+    const fits = cleanedTokens < model.context ? '✅' : '❌';
+    console.log(`   ${fits} ${model.name}: ${usage}% of ${model.context.toLocaleString()} token context`);
+  });
+
+  console.log('='.repeat(80));
+}
+
 async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, parallelCount = 1) {
   // Validate input directory
   if (!fs.existsSync(notesDir)) {
@@ -415,7 +540,7 @@ async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, paral
   const monthlyDetails = [];
 
   // Helper function to process a single month
-  async function processMonth(group, index, totalMonths) {
+  async function processMonth(group) {
     const result = { success: false, monthName: group.monthName, summary: null, error: null };
     const showProgress = parallelCount === 1; // Only show spinner in sequential mode
 
@@ -424,11 +549,20 @@ async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, paral
     console.log('='.repeat(60));
 
     const monthContent = [];
+    const prioritySections = [];
 
     // Collect and clean content for this month (already read during grouping)
     for (const fileInfo of group.files) {
       if (fileInfo.content && fileInfo.content.trim()) {
+        // Count priority sections for logging (but don't extract them)
+        const filePriorities = extractPrioritySections(fileInfo.content);
+        if (filePriorities.length > 0) {
+          prioritySections.push(...filePriorities);
+        }
+
+        // Clean the content while KEEPING priority sections in their date context
         const cleanedContent = cleanMarkdownContent(fileInfo.content);
+
         monthContent.push(cleanedContent);
         const dateStr = fileInfo.dateInfo
           ? ` (${fileInfo.dateInfo.month}/${fileInfo.dateInfo.day}/${fileInfo.dateInfo.year})`
@@ -439,13 +573,31 @@ async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, paral
       }
     }
 
+    // Log priority sections found
+    if (prioritySections.length > 0) {
+      console.log(`  📌 Found ${prioritySections.length} "Things That Matter To Me" section(s) across entries`);
+    }
+
     if (monthContent.length === 0) {
       console.log(`  No content to summarize for ${group.monthName}`);
       return result; // Skip this month - no content
     }
 
-    // Combine content for this month
-    const combinedMonthText = monthContent.join("\n\n---\n\n");
+    // Combine content for this month (priority sections remain in date context)
+    let combinedMonthText = monthContent.join("\n\n---\n\n");
+
+    // Add a header noting priority sections if any were found
+    if (prioritySections.length > 0) {
+      const priorityReminder = `
+==========================================================================
+NOTE: This content includes ${prioritySections.length} "Things That Matter To Me" section(s)
+within their date context. (See prompt instructions for handling.)
+==========================================================================
+
+`;
+      combinedMonthText = priorityReminder + combinedMonthText;
+    }
+
     const originalLength = group.files.reduce((sum, f) => sum + (f.content?.length || 0), 0);
     const savedChars = originalLength - combinedMonthText.length;
     const savedPercent = ((savedChars / originalLength) * 100).toFixed(1);
@@ -503,6 +655,14 @@ async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, paral
             console.log(`\n    [${j + 1}/${chunks.length}] Summarizing chunk...`);
 
             try {
+              // Save debug prompt for chunk if enabled
+              if (SAVE_DEBUG_PROMPTS) {
+                const debugFilename = `DEBUG_PROMPT_${group.key}_${group.monthName.replace(/\s+/g, '_')}_chunk${j + 1}.txt`;
+                const debugPath = path.join(outputDir, debugFilename);
+                fs.writeFileSync(debugPath, chunks[j]);
+                console.log(`    💾 Saved chunk ${j + 1} debug prompt to: ${debugFilename}`);
+              }
+
               const chunkSummary = await summarizeWithOllama(chunks[j], showProgress);
               chunkSummaries.push(chunkSummary);
               console.log(`    ✓ Chunk ${j + 1} complete`);
@@ -530,11 +690,28 @@ async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, paral
           const combinedChunkSummaries = chunkSummaries.join("\n\n---\n\n");
           const finalInput = promptInstructions + combinedChunkSummaries;
 
+          // Save debug prompt for final combination if enabled
+          if (SAVE_DEBUG_PROMPTS) {
+            const debugFilename = `DEBUG_PROMPT_${group.key}_${group.monthName.replace(/\s+/g, '_')}_FINAL.txt`;
+            const debugPath = path.join(outputDir, debugFilename);
+            fs.writeFileSync(debugPath, finalInput);
+            console.log(`  💾 Saved final combination debug prompt to: ${debugFilename}`);
+          }
+
           monthlySummary = await summarizeWithOllama(finalInput, showProgress);
         } else {
           // Direct summarization for smaller content
           console.log(`\n  Summarizing month directly...`);
           const monthTextWithPrompt = promptInstructions + combinedMonthText;
+
+          // Save debug prompt if enabled
+          if (SAVE_DEBUG_PROMPTS) {
+            const debugFilename = `DEBUG_PROMPT_${group.key}_${group.monthName.replace(/\s+/g, '_')}.txt`;
+            const debugPath = path.join(outputDir, debugFilename);
+            fs.writeFileSync(debugPath, monthTextWithPrompt);
+            console.log(`  💾 Saved debug prompt to: ${debugFilename}`);
+          }
+
           monthlySummary = await summarizeWithOllama(monthTextWithPrompt, showProgress);
         }
 
@@ -569,8 +746,8 @@ async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, paral
     }
 
     // Process batch in parallel
-    const batchPromises = batch.map((group, batchIndex) =>
-      processMonth(group, i + batchIndex, monthGroups.length)
+    const batchPromises = batch.map((group) =>
+      processMonth(group)
     );
 
     const results = await Promise.all(batchPromises);
@@ -602,9 +779,61 @@ async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, paral
   console.log(`${dryRun ? 'Would create' : 'Creating'} aggregate summary from ${monthlySummaries.length} month(s)...`);
   console.log('='.repeat(60));
 
-  const aggregatePrompt = `INSTRUCTIONS: Provide a comprehensive summary that synthesizes the following monthly summaries, identifying overarching themes, patterns, and key developments across the time period.\n\n---\n\n`;
+  const aggregatePrompt = `INSTRUCTIONS: You are synthesizing monthly summaries from a year of personal journal entries. Create a comprehensive, BALANCED summary that celebrates growth while acknowledging challenges.
 
-  const aggregateInput = monthlyDetails.map((detail, idx) => {
+## CRITICAL REQUIREMENTS:
+
+1. **START WITH WINS**: Begin by identifying and celebrating victories, progress, and positive developments
+2. **Balance is Mandatory**: For every challenge or struggle mentioned, highlight corresponding efforts, growth, or wins
+3. **Celebrate Consistency**: Showing up, maintaining effort, and self-awareness are victories - acknowledge them!
+4. **Honor Core Priorities**: "Things That Matter" sections represent core values - track progress in these areas with special attention
+5. **Empathetic & Encouraging**: Imagine summarizing for a good friend - honest about challenges but emphasizing their growth and resilience
+6. **Be Specific**: Use concrete details, names, dates, metrics, and specific wins from the monthly summaries
+
+## WRITING TONE:
+This is a year-in-review for someone who has put in consistent effort. They deserve to see their progress celebrated. Frame challenges as part of a growth journey, not as defining characteristics.
+
+## OUTPUT FORMAT:
+
+**IMPORTANT**: Format your response in Markdown with proper heading hierarchy for readability.
+
+Use this exact structure with Markdown headings:
+
+# Year in Review
+
+## The Year at a Glance
+[2-3 sentences capturing the essence - START POSITIVE, emphasize growth trajectory]
+
+## Wins & Victories
+[SPECIFIC accomplishments, breakthroughs, consistent efforts, and positive developments - be generous here! Use bullet points for clarity.]
+
+## New Habits Tried
+[New behaviors, experiments, routines, or practices attempted across the year - celebrate trying new things! Use bullet points.]
+
+## Core Priorities & Progress
+[Track "Things That Matter" areas - what's going well, where energy is focused, progress made. Consider using subheadings (###) for each priority area if helpful.]
+
+## Key Themes & Patterns
+[3-5 main themes - BALANCED: note both positive patterns AND challenges as growth opportunities. Use bullet points or numbered list.]
+
+## Challenges & Growth Edges
+[Areas of struggle framed constructively - what's being learned, how they're showing up despite difficulties. Use bullet points.]
+
+## The Path Forward
+[Encouraging reflection on trajectory, strengths to build on, opportunities ahead]
+
+## REMEMBER:
+- Victories FIRST, challenges second
+- For every struggle, note the effort, awareness, or growth
+- This person showed up all year - honor that commitment
+
+---
+
+MONTHLY SUMMARIES TO SYNTHESIZE:
+
+`;
+
+  const aggregateInput = monthlyDetails.map((detail) => {
     return `## ${detail.monthName}\n\n${detail.summary}`;
   }).join("\n\n---\n\n");
 
@@ -616,17 +845,24 @@ async function summarizeMarkdownFiles(notesDir, outputDir, dryRun = false, paral
     const estimatedTime = estimateTime(inputTokens, 500);
     console.log(`    📊 Input: ~${inputTokens.toLocaleString()} tokens (~${finalAggregateText.length.toLocaleString()} chars)`);
     console.log(`    ⏱️  Estimated time: ~${formatDuration(estimatedTime)}`);
-    console.log(`\nWould save aggregate summary to: AGGREGATE_SUMMARY.txt`);
+    console.log(`\nWould save aggregate summary to: AGGREGATE_SUMMARY.md`);
   } else {
     console.log(`\nGenerating aggregate summary...`);
+
+    // Save debug prompt for aggregate if enabled
+    if (SAVE_DEBUG_PROMPTS) {
+      const debugPath = path.join(outputDir, "DEBUG_PROMPT_AGGREGATE.txt");
+      fs.writeFileSync(debugPath, finalAggregateText);
+      console.log(`💾 Saved aggregate debug prompt to: DEBUG_PROMPT_AGGREGATE.txt`);
+    }
 
     try {
       const aggregateSummary = await summarizeWithOllama(finalAggregateText, true);
 
-      const aggregatePath = path.join(outputDir, "AGGREGATE_SUMMARY.txt");
+      const aggregatePath = path.join(outputDir, "AGGREGATE_SUMMARY.md");
       fs.writeFileSync(aggregatePath, aggregateSummary);
 
-      console.log(`\n✓ Aggregate summary saved to: AGGREGATE_SUMMARY.txt`);
+      console.log(`\n✓ Aggregate summary saved to: AGGREGATE_SUMMARY.md`);
     } catch (error) {
       console.error(`\n✗ Failed to create aggregate summary: ${error.message}`);
 
@@ -666,6 +902,7 @@ Options:
   --parallel <N>     Process N months concurrently for faster completion
                      Recommended: 4-6 for M4 Mac mini (default: 1)
   --dry-run          Show estimates and analysis without running summarization
+  --concatenate      Concatenate all files into a single file and report token count
   --help, -h         Show this help message
 
 Examples:
@@ -674,6 +911,7 @@ Examples:
   node index.js ~/Documents/Notes --parallel 4
   node index.js ~/Documents/Notes --dry-run
   node index.js ~/Documents/Notes --parallel 4 --dry-run
+  node index.js ~/Documents/Notes --concatenate
 
 Performance:
   Sequential (default): Processes one month at a time
@@ -696,6 +934,9 @@ Requirements:
 }
 
 async function main() {
+  const scriptStartTime = Date.now();
+  console.log(`🚀 Script started at: ${new Date().toLocaleString()}\n`);
+
   const args = process.argv.slice(2);
 
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
@@ -705,28 +946,53 @@ async function main() {
 
   // Parse flags
   const dryRun = args.includes("--dry-run");
+  const concatenateMode = args.includes("--concatenate");
 
   // Parse --parallel flag
   let parallelCount = 1; // Default: sequential processing
   const parallelIndex = args.findIndex(arg => arg === "--parallel");
+  let parallelValue = null;
   if (parallelIndex !== -1 && args[parallelIndex + 1]) {
-    const parallelValue = parseInt(args[parallelIndex + 1], 10);
-    if (isNaN(parallelValue) || parallelValue < 1) {
+    parallelValue = args[parallelIndex + 1];
+    const parallelNum = parseInt(parallelValue, 10);
+    if (isNaN(parallelNum) || parallelNum < 1) {
       console.error("Error: --parallel must be followed by a positive number");
       process.exit(1);
     }
-    if (parallelValue > 8) {
-      console.warn(`Warning: --parallel ${parallelValue} is high. Recommended: 4-6 for M4 Mac mini`);
+    if (parallelNum > 8) {
+      console.warn(`Warning: --parallel ${parallelNum} is high. Recommended: 4-6 for M4 Mac mini`);
     }
-    parallelCount = parallelValue;
+    parallelCount = parallelNum;
   }
 
-  const pathArgs = args.filter(arg => !arg.startsWith("--") && arg !== args[parallelIndex + 1]);
+  // Filter out flags and the parallel value if present
+  const pathArgs = args.filter(arg => {
+    if (arg.startsWith("--")) return false; // Remove flags
+    if (parallelValue && arg === parallelValue) return false; // Remove parallel value
+    return true;
+  });
+
+  if (pathArgs.length === 0) {
+    console.error("Error: No notes directory specified");
+    printUsage();
+    process.exit(1);
+  }
 
   const notesDir = path.resolve(pathArgs[0]);
   const outputDir = pathArgs[1]
     ? path.resolve(pathArgs[1])
     : path.join(path.dirname(notesDir), path.basename(notesDir) + DEFAULT_OUTPUT_SUFFIX);
+
+  if (concatenateMode) {
+    console.log(`${'='.repeat(60)}`);
+    console.log(`CONCATENATE MODE - Creating single file with all content`);
+    console.log('='.repeat(60));
+    console.log(`Notes directory: ${notesDir}`);
+    console.log(`Output directory: ${outputDir}\n`);
+
+    await concatenateAllFiles(notesDir, outputDir);
+    return; // Exit after concatenation
+  }
 
   if (dryRun) {
     console.log(`${'='.repeat(60)}`);
@@ -742,6 +1008,14 @@ async function main() {
   console.log();
 
   await summarizeMarkdownFiles(notesDir, outputDir, dryRun, parallelCount);
+
+  // Log completion time
+  const scriptEndTime = Date.now();
+  const totalDuration = (scriptEndTime - scriptStartTime) / 1000; // Convert to seconds
+  console.log(`\n${'='.repeat(60)}`);
+  console.log(`✅ Script completed at: ${new Date().toLocaleString()}`);
+  console.log(`⏱️  Total execution time: ${formatDuration(totalDuration)}`);
+  console.log('='.repeat(60));
 }
 
 main().catch(err => {
